@@ -30,8 +30,10 @@ import requests
 
 try:
     from .auth import ZohoAuthError, ZohoSession, login
+    from .notifier import notify
 except ImportError:  # Allow `python src/zoho_punch.py ...`
     from auth import ZohoAuthError, ZohoSession, login  # type: ignore[no-redef]
+    from notifier import notify  # type: ignore[no-redef]
 
 LOGGER = logging.getLogger("zoho_punch")
 
@@ -235,41 +237,95 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        LOGGER.info("Authenticating with Zoho ...")
-        zs = login()
-        LOGGER.info("Authenticated.")
-
-        status = get_status(zs)
-        currently_in = is_checked_in(status)
-        label = state_label(status)
-        LOGGER.info("Current Zoho attendance state: %s", label)
+        zs, status = _authenticate_and_status()
 
         if args.status_only:
-            print(json.dumps({"state": label, "raw": status}, indent=2, default=str))
+            print(json.dumps({"state": state_label(status), "raw": status}, indent=2, default=str))
             return 0
 
-        if not args.force:
-            if args.action == "checkin" and currently_in:
-                LOGGER.info("Already checked in - nothing to do. Exiting cleanly.")
-                return 0
-            if args.action == "checkout" and not currently_in:
-                LOGGER.info("Already checked out - nothing to do. Exiting cleanly.")
-                return 0
+        return _run_action(args.action, zs, status, force=args.force)
 
-        LOGGER.info("Submitting %s ...", args.action)
-        body = punch(args.action, zs)
     except ZohoAuthError as exc:
         LOGGER.error("Authentication failed: %s", exc)
-        return 1
-    except PunchError as exc:
-        LOGGER.error("Punch failed: %s", exc)
+        notify(
+            event="failure",
+            action=args.action,
+            summary="Authentication failed",
+            detail_lines=[("Error", str(exc))],
+            payload={"error": str(exc)},
+        )
         return 1
     except requests.RequestException as exc:
         LOGGER.error("Network error: %s", exc)
+        notify(
+            event="failure",
+            action=args.action,
+            summary="Network error",
+            detail_lines=[("Error", str(exc))],
+            payload={"error": str(exc)},
+        )
         return 2
 
-    LOGGER.info("%s succeeded.", args.action.capitalize())
+
+def _authenticate_and_status() -> tuple[ZohoSession, dict[str, Any]]:
+    LOGGER.info("Authenticating with Zoho ...")
+    zs = login()
+    LOGGER.info("Authenticated.")
+    status = get_status(zs)
+    LOGGER.info("Current Zoho attendance state: %s", state_label(status))
+    return zs, status
+
+
+def _run_action(action: str, zs: ZohoSession, status: dict[str, Any], *, force: bool) -> int:
+    currently_in = is_checked_in(status)
+    label = state_label(status)
+    action_label = "Check-In" if action == "checkin" else "Check-Out"
+
+    if not force:
+        if action == "checkin" and currently_in:
+            LOGGER.info("Already checked in - nothing to do. Exiting cleanly.")
+            notify(
+                event="skip",
+                action=action,
+                summary=f"Already {label}",
+                detail_lines=[("State", label), ("Reason", "No-op: already checked in")],
+                payload=status,
+            )
+            return 0
+        if action == "checkout" and not currently_in:
+            LOGGER.info("Already checked out - nothing to do. Exiting cleanly.")
+            notify(
+                event="skip",
+                action=action,
+                summary=f"Already {label}",
+                detail_lines=[("State", label), ("Reason", "No-op: already checked out")],
+                payload=status,
+            )
+            return 0
+
+    try:
+        LOGGER.info("Submitting %s ...", action)
+        body = punch(action, zs)
+    except PunchError as exc:
+        LOGGER.error("Punch failed: %s", exc)
+        notify(
+            event="failure",
+            action=action,
+            summary=f"{action_label} rejected by Zoho",
+            detail_lines=[("State before", label), ("Error", str(exc))],
+            payload={"error": str(exc)},
+        )
+        return 1
+
+    LOGGER.info("%s succeeded.", action_label)
     print(json.dumps(body, indent=2, sort_keys=True, default=str))
+    notify(
+        event="success",
+        action=action,
+        summary=f"{action_label} recorded successfully",
+        detail_lines=[("Previous state", label), ("New state", "Office In" if action == "checkin" else "Office Out")],
+        payload=body,
+    )
     return 0
 
 

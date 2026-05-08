@@ -30,8 +30,14 @@ Automate daily check-in / check-out on Zoho People with no manual interaction.
 | Variable | `PUNCH_TIMEZONE` | default `Asia/Karachi` |
 | Variable | `PUNCH_LATITUDE` / `PUNCH_LONGITUDE` / `PUNCH_ACCURACY` | optional geolocation |
 
+## Notifications
+- After every punch run the script sends an **HTML + plain-text email** to the configured recipients via SMTP (Gmail / Google Workspace App Password by default).
+- Three event types covered: `success`, `skip` (already in/out), `failure` (auth, network, or Zoho rejection). Selectable via `NOTIFY_ON`.
+- Email body includes timestamp, state transition, geolocation, and the full Zoho JSON response.
+- If `SMTP_USER` / `SMTP_APP_PASSWORD` are not set, notifications are silently skipped — punches still run.
+
 ## Non-functional
-- Pure Python 3.11+, runtime deps: `requests`, `pyotp`, `python-dotenv`.
-- CLI: `python -m src.zoho_punch --action {checkin|checkout} [--skip-weekend] [-v]`.
-- Exit codes: `0` success, `1` auth/logic error, `2` network error.
+- Pure Python 3.11+, runtime deps: `requests`, `pyotp`, `python-dotenv`. SMTP uses the standard library only.
+- CLI: `python -m src.zoho_punch --action {checkin|checkout} [--skip-weekend] [--force] [--status-only] [-v]`.
+- Exit codes: `0` success or no-op, `1` auth/logic error, `2` network error.
 - No HAR / `.env` / cookies committed (enforced via `.gitignore`).

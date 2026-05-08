@@ -66,5 +66,13 @@ jobs:
           PUNCH_LATITUDE: ${{ vars.PUNCH_LATITUDE }}
           PUNCH_LONGITUDE: ${{ vars.PUNCH_LONGITUDE }}
           PUNCH_ACCURACY: ${{ vars.PUNCH_ACCURACY }}
+          # Email notification settings (Gmail App Password)
+          SMTP_HOST: ${{ vars.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ vars.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_APP_PASSWORD: ${{ secrets.SMTP_APP_PASSWORD }}
+          NOTIFY_FROM: ${{ vars.NOTIFY_FROM || 'Zoho Punch Bot' }}
+          NOTIFY_TO: ${{ vars.NOTIFY_TO }}
+          NOTIFY_ON: ${{ vars.NOTIFY_ON || 'success,skip,failure' }}
         run: |
           python -m src.zoho_punch --action ${{ steps.pick.outputs.action }} --skip-weekend

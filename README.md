@@ -59,6 +59,38 @@ Repo → **Settings → Secrets and variables → Actions → Variables tab**:
 
 > If you set lat/lng, set both. They’re sent the same way the web UI does.
 
+### 3. Email notifications (optional)
+
+The script can email you after every punch (success / skip / failure). Works with any SMTP server; the example below uses **Gmail App Password**.
+
+#### Generate a Gmail App Password
+1. Go to <https://myaccount.google.com/apppasswords> (sign in if prompted).
+2. App name: `Punch_ox` (or anything you like) → **Create**.
+3. Copy the 16-character password (no spaces).
+
+#### Add the secrets / variables
+
+| Type | Name | Value |
+|---|---|---|
+| Secret | `SMTP_USER` | the Gmail address that owns the App Password |
+| Secret | `SMTP_APP_PASSWORD` | 16-char App Password |
+| Variable | `NOTIFY_TO` | comma-separated recipient list (defaults to `SMTP_USER`) |
+| Variable | `NOTIFY_FROM` | display name in the From header (default: `Zoho Punch Bot`) |
+| Variable | `NOTIFY_ON` | which events trigger an email (default: `success,skip,failure`) |
+| Variable | `SMTP_HOST` | non-Gmail SMTP server (default: `smtp.gmail.com`) |
+| Variable | `SMTP_PORT` | non-default port (default: `587` for STARTTLS, `465` for SSL) |
+
+> If `SMTP_USER` or `SMTP_APP_PASSWORD` is missing, email is **silently disabled** — your punches still run.
+
+#### What the email looks like
+
+Subjects:
+- `[Zoho Punch] SUCCESS - Check-In - Check-In recorded successfully`
+- `[Zoho Punch] SKIPPED - Check-In - Already Office In`
+- `[Zoho Punch] FAILURE - Check-Out - Check-Out rejected by Zoho`
+
+Body (HTML version): coloured banner (green / gray / red), key/value table with timestamp + state transition + location, and the **full Zoho JSON response** in a code block. A plain-text fallback is included for clients that don't render HTML.
+
 ---
 
 ## Schedule
@@ -129,6 +161,7 @@ python -m src.zoho_punch --action checkout --verbose
 ├── .github/workflows/zoho-attendance.yml   # CI schedule + manual trigger
 ├── src/
 │   ├── auth.py        # email+password+TOTP login flow
+│   ├── notifier.py    # SMTP email notifier (HTML + plain text)
 │   └── zoho_punch.py  # main entry point
 ├── config.example.env # template for local .env
 ├── requirements.txt
