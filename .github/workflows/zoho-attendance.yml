@@ -1,0 +1,70 @@
+name: Zoho People Attendance
+
+on:
+  schedule:
+    # All times in UTC. Pakistan Standard Time (PKT) = UTC+5.
+    # 14:00 PKT (Check-In)  -> 09:00 UTC, Mon-Fri
+    - cron: "0 9 * * 1-5"
+    # 23:00 PKT (Check-Out) -> 18:00 UTC, Mon-Fri
+    - cron: "0 18 * * 1-5"
+
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to run"
+        required: true
+        default: "checkin"
+        type: choice
+        options:
+          - checkin
+          - checkout
+
+jobs:
+  punch:
+    name: Punch ${{ github.event.schedule == '0 18 * * 1-5' && 'Check-Out' || 'Check-In' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Determine action
+        id: pick
+        env:
+          MANUAL_ACTION: ${{ github.event.inputs.action }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          if [ -n "$MANUAL_ACTION" ]; then
+            echo "action=$MANUAL_ACTION" >> "$GITHUB_OUTPUT"
+          elif [ "$SCHEDULE" = "0 18 * * 1-5" ]; then
+            echo "action=checkout" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=checkin" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run punch (${{ steps.pick.outputs.action }})
+        env:
+          ZOHO_EMAIL: ${{ secrets.ZOHO_EMAIL }}
+          ZOHO_PASSWORD: ${{ secrets.ZOHO_PASSWORD }}
+          ZOHO_TOTP_SECRET: ${{ secrets.ZOHO_TOTP_SECRET }}
+          ZOHO_PORTAL: ${{ secrets.ZOHO_PORTAL }}
+          ZOHO_ACCOUNTS_URL: ${{ vars.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com' }}
+          ZOHO_PEOPLE_URL: ${{ vars.ZOHO_PEOPLE_URL || 'https://people.zoho.com' }}
+          PUNCH_TIMEZONE: ${{ vars.PUNCH_TIMEZONE || 'Asia/Karachi' }}
+          PUNCH_LATITUDE: ${{ vars.PUNCH_LATITUDE }}
+          PUNCH_LONGITUDE: ${{ vars.PUNCH_LONGITUDE }}
+          PUNCH_ACCURACY: ${{ vars.PUNCH_ACCURACY }}
+        run: |
+          python -m src.zoho_punch --action ${{ steps.pick.outputs.action }} --skip-weekend
