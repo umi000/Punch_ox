@@ -4,9 +4,9 @@ on:
   schedule:
     # All times in UTC. Pakistan Standard Time (PKT) = UTC+5.
     # 13:00 PKT (Check-In, 1:00 PM) -> 08:00 UTC, Mon-Fri  (~9h shift to check-out)
-    - cron: "0 8 * * 1-5"
+    - cron: "05 6 * * 1-5"
     # 22:00 PKT (Check-Out, 10:00 PM) -> 17:00 UTC, Mon-Fri
-    - cron: "0 17 * * 1-5"
+    - cron: "05 15 * * 1-5"
 
   workflow_dispatch:
     inputs:
@@ -21,7 +21,7 @@ on:
 
 jobs:
   punch:
-    name: Punch ${{ github.event.schedule == '0 17 * * 1-5' && 'Check-Out' || 'Check-In' }}
+    name: Punch ${{ github.event.schedule == '05 15 * * 1-5' && 'Check-Out' || 'Check-In' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -48,7 +48,7 @@ jobs:
         run: |
           if [ -n "$MANUAL_ACTION" ]; then
             echo "action=$MANUAL_ACTION" >> "$GITHUB_OUTPUT"
-          elif [ "$SCHEDULE" = "0 17 * * 1-5" ]; then
+          elif [ "$SCHEDULE" = "05 15 * * 1-5" ]; then
             echo "action=checkout" >> "$GITHUB_OUTPUT"
           else
             echo "action=checkin" >> "$GITHUB_OUTPUT"
