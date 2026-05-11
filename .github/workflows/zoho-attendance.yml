@@ -3,9 +3,9 @@ name: Zoho People Attendance
 on:
   schedule:
     # All times in UTC. Pakistan Standard Time (PKT) = UTC+5.
-    # 13:00 PKT (Check-In, 1:00 PM) -> 08:00 UTC, Mon-Fri  (~9h shift to check-out)
+    # 11:05 PKT (Check-In) -> 06:05 UTC, Mon-Fri (:05 past the hour avoids :00 UTC queue spikes)
     - cron: "05 6 * * 1-5"
-    # 22:00 PKT (Check-Out, 10:00 PM) -> 17:00 UTC, Mon-Fri
+    # 20:05 PKT (Check-Out, 8:05 PM) -> 15:05 UTC, Mon-Fri
     - cron: "05 15 * * 1-5"
 
   workflow_dispatch:

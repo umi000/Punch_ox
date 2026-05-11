@@ -4,8 +4,8 @@
 Automate daily check-in / check-out on Zoho People with no manual interaction.
 
 ## Functional Requirements
-- Mark **Check-In** Mon–Fri at **01:00 PM PKT (13:00, Asia/Karachi)**.
-- Mark **Check-Out** Mon–Fri at **10:00 PM PKT (22:00, Asia/Karachi)** (~9 h shift).
+- Mark **Check-In** Mon–Fri at **~11:05 AM PKT (06:05 UTC, Asia/Karachi)**.
+- Mark **Check-Out** Mon–Fri at **~8:05 PM PKT (15:05 UTC, Asia/Karachi)** (~9 h shift).
 - Skip Saturday and Sunday.
 - Allow on-demand manual runs (check-in / check-out) from GitHub Actions UI.
 - Run entirely in **GitHub Actions** with no self-hosted runners.
