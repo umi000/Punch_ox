@@ -4,8 +4,8 @@
 Automate daily check-in / check-out on Zoho People with no manual interaction.
 
 ## Functional Requirements
-- Mark **Check-In** Mon–Fri at **02:00 PM PKT (Asia/Karachi)**.
-- Mark **Check-Out** Mon–Fri at **11:00 PM PKT (Asia/Karachi)**.
+- Mark **Check-In** Mon–Fri at **01:00 PM PKT (13:00, Asia/Karachi)**.
+- Mark **Check-Out** Mon–Fri at **10:00 PM PKT (22:00, Asia/Karachi)** (~9 h shift).
 - Skip Saturday and Sunday.
 - Allow on-demand manual runs (check-in / check-out) from GitHub Actions UI.
 - Run entirely in **GitHub Actions** with no self-hosted runners.
@@ -32,7 +32,7 @@ Automate daily check-in / check-out on Zoho People with no manual interaction.
 
 ## Notifications
 - After every punch run the script sends an **HTML + plain-text email** to the configured recipients via SMTP (Gmail / Google Workspace App Password by default).
-- Three event types covered: `success`, `skip` (already in/out), `failure` (auth, network, or Zoho rejection). Selectable via `NOTIFY_ON`.
+- Event types covered: `success`, `skip` (already in/out, weekend no-punch when `--skip-weekend` is set), `failure` (auth, network, or Zoho rejection). Selectable via `NOTIFY_ON`.
 - Email body includes timestamp, state transition, geolocation, and the full Zoho JSON response.
 - If `SMTP_USER` / `SMTP_APP_PASSWORD` are not set, notifications are silently skipped — punches still run.
 

@@ -2,8 +2,8 @@
 
 Automated daily check-in / check-out on Zoho People, designed to run unattended in **GitHub Actions**.
 
-- **Check-In:** every weekday (Mon–Fri) at **02:00 PM PKT**
-- **Check-Out:** every weekday (Mon–Fri) at **11:00 PM PKT**
+- **Check-In:** every weekday (Mon–Fri) at **01:00 PM PKT** (13:00)
+- **Check-Out:** every weekday (Mon–Fri) at **10:00 PM PKT** (22:00; ~9 h after check-in)
 - Logs in with **email + password** (and TOTP if 2FA is enabled), then calls the same internal endpoint the web UI uses.
 
 ---
@@ -99,8 +99,8 @@ Defined in [`.github/workflows/zoho-attendance.yml`](.github/workflows/zoho-atte
 
 | Action | Local (PKT) | UTC cron | Days |
 |---|---|---|---|
-| Check-In  | 14:00 | `0 9 * * 1-5`  | Mon–Fri |
-| Check-Out | 23:00 | `0 18 * * 1-5` | Mon–Fri |
+| Check-In  | 13:00 | `0 8 * * 1-5`  | Mon–Fri |
+| Check-Out | 22:00 | `0 17 * * 1-5` | Mon–Fri |
 
 > ⚠️ GitHub Actions cron is **best-effort** — it can be delayed by 5–15 minutes during peak load. The script also self-skips on Saturday/Sunday in case of timezone-boundary edge cases.
 

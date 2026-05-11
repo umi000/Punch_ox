@@ -233,7 +233,18 @@ def main(argv: list[str] | None = None) -> int:
     tz_name = os.environ.get("PUNCH_TIMEZONE", DEFAULT_TIMEZONE)
 
     if args.skip_weekend and not _is_weekday(tz_name):
+        now_local = _now_in_zone(tz_name)
         LOGGER.info("Today is a weekend in %s - skipping %s.", tz_name, args.action)
+        notify(
+            event="skip",
+            action=args.action,
+            summary=f"Weekend in {tz_name} — no punch attempted",
+            detail_lines=[
+                ("Local date", now_local.strftime("%A, %Y-%m-%d")),
+                ("Reason", f"--skip-weekend: {args.action} not run on Sat/Sun"),
+            ],
+            payload={"timezone": tz_name, "local_iso": now_local.isoformat()},
+        )
         return 0
 
     try:
