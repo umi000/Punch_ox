@@ -108,9 +108,9 @@ def _retry_on_network(
 
 
 def get_status(zs: ZohoSession, *, timeout: int | None = None) -> dict[str, Any]:
+    """Return Zoho's current attendance state for the logged-in user."""
     if timeout is None:
         timeout = request_timeout()
-    """Return Zoho's current attendance state for the logged-in user."""
     url = f"{zs.people_url}/{zs.portal}/AttendanceAction.zp"
     headers = {
         "Origin": zs.people_url,

@@ -94,10 +94,11 @@ def _build_session() -> requests.Session:
             "DNT": "1",
         }
     )
+    # Retry connect/server errors only — read timeouts during SSO can leave a broken session.
     retry = Retry(
         total=3,
         connect=3,
-        read=3,
+        read=0,
         backoff_factor=2,
         status_forcelist=(502, 503, 504),
         allowed_methods=frozenset({"GET", "POST"}),
@@ -270,6 +271,53 @@ def _looks_like_tfa(payload: dict[str, Any]) -> bool:
     return any(marker in next_lower for marker in challenge_markers)
 
 
+def _redirect_from_auth(payload: dict[str, Any]) -> str | None:
+    """Extract the post-login redirect URL from a Zoho sign-in JSON response."""
+    for key in ("redirect_uri", "location", "next", "redirect_url", "redirectURL"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.startswith("http"):
+            return val
+    for nested_key in ("password", "passwordauth", "totpsecondauth", "totp"):
+        nested = payload.get(nested_key)
+        if isinstance(nested, dict):
+            found = _redirect_from_auth(nested)
+            if found:
+                return found
+    return None
+
+
+def _auth_indicates_success(payload: dict[str, Any]) -> bool:
+    status_code = str(payload.get("status_code", ""))
+    code = str(payload.get("code", "")).upper()
+    if status_code in {"200", "201"}:
+        return True
+    if code in {"SUCCESS", "SI200", "IN200"}:
+        return True
+    if str(payload.get("status", "")).lower() == "success":
+        return True
+    return _redirect_from_auth(payload) is not None
+
+
+def _follow_redirect(session: requests.Session, url: str, *, timeout: int) -> requests.Response:
+    LOGGER.debug("GET %s (post-auth redirect)", url)
+    resp = session.get(url, timeout=timeout, allow_redirects=True)
+    resp.raise_for_status()
+    return resp
+
+
+def _is_login_page(url: str) -> bool:
+    lower = url.lower()
+    return "accounts.zoho." in lower and "signin" in lower
+
+
+def _csrf_available(session: requests.Session, html: str) -> bool:
+    try:
+        _extract_csrf_token(session, html)
+        return True
+    except ZohoAuthError:
+        return False
+
+
 def _generate_totp(secret: str) -> str:
     try:
         import pyotp
@@ -293,21 +341,42 @@ def _establish_people_session(
 ) -> requests.Response:
     """Complete SSO, then load the portal home page (required for attendance APIs)."""
     service_url = f"{people_url}/people"
+    portal_url = f"{people_url}/{portal}/zp"
+
     LOGGER.debug("GET %s (SSO redirect chain)", service_url)
     sso_resp = session.get(service_url, timeout=timeout, allow_redirects=True)
     sso_resp.raise_for_status()
 
-    final = sso_resp.url.lower()
-    if "signin" in final or "/announcement/" in final or "accounts.zoho.com" in final:
-        LOGGER.warning("SSO did not land on People (final URL=%s)", sso_resp.url)
+    if _is_login_page(sso_resp.url):
+        LOGGER.warning("SSO /people landed on login (final URL=%s)", sso_resp.url)
 
-    portal_url = f"{people_url}/{portal}/zp"
     LOGGER.debug("GET %s (portal session + conreqcsr)", portal_url)
-    portal_resp = session.get(portal_url, timeout=timeout, allow_redirects=True)
+    portal_resp = session.get(
+        portal_url,
+        timeout=timeout,
+        allow_redirects=True,
+        headers={"Referer": service_url},
+    )
     portal_resp.raise_for_status()
 
-    portal_final = portal_resp.url.lower()
-    if "accounts.zoho.com" in portal_final or "signin" in portal_final:
+    if _is_login_page(portal_resp.url):
+        LOGGER.warning("Portal page hit login; refreshing SSO then retrying portal once")
+        session.get(service_url, timeout=timeout, allow_redirects=True)
+        portal_resp = session.get(
+            portal_url,
+            timeout=timeout,
+            allow_redirects=True,
+            headers={"Referer": service_url},
+        )
+        portal_resp.raise_for_status()
+
+    if _is_login_page(portal_resp.url):
+        if _csrf_available(session, sso_resp.text):
+            LOGGER.warning(
+                "Portal still on login; using CSRF from /people (final URL=%s)",
+                portal_resp.url,
+            )
+            return sso_resp
         raise ZohoAuthError(
             f"Portal page redirected to login (final URL={portal_resp.url}). "
             "Check ZOHO_PORTAL and that this account can access the portal."
@@ -404,6 +473,8 @@ def login() -> ZohoSession:
 
     needs_totp = _looks_like_tfa(pw_resp)
 
+    auth_payload = pw_resp
+
     if needs_totp:
         totp_secret = os.environ.get("ZOHO_TOTP_SECRET", "").strip()
         if not totp_secret:
@@ -416,6 +487,14 @@ def login() -> ZohoSession:
         totp_resp = _totp_verify(session, accounts_url, csrf, user_id, otp, timeout=timeout)
         if str(totp_resp.get("status_code", "")) in {"E401", "401"}:
             raise ZohoAuthError(f"TOTP verify failed: {totp_resp}")
+        auth_payload = totp_resp
+
+    if not _auth_indicates_success(auth_payload):
+        raise ZohoAuthError(f"Login did not return success: {auth_payload}")
+
+    redirect = _redirect_from_auth(auth_payload)
+    if redirect:
+        _follow_redirect(session, redirect, timeout=timeout)
 
     landing_resp = _establish_people_session(
         session, people_url, portal, timeout=timeout
