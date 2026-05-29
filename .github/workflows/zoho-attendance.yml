@@ -23,7 +23,7 @@ jobs:
   punch:
     name: Punch ${{ github.event.schedule == '05 15 * * 1-5' && 'Check-Out' || 'Check-In' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout repository
@@ -62,6 +62,7 @@ jobs:
           ZOHO_PORTAL: ${{ secrets.ZOHO_PORTAL }}
           ZOHO_ACCOUNTS_URL: ${{ vars.ZOHO_ACCOUNTS_URL || 'https://accounts.zoho.com' }}
           ZOHO_PEOPLE_URL: ${{ vars.ZOHO_PEOPLE_URL || 'https://people.zoho.com' }}
+          ZOHO_REQUEST_TIMEOUT: ${{ vars.ZOHO_REQUEST_TIMEOUT || '60' }}
           PUNCH_TIMEZONE: ${{ vars.PUNCH_TIMEZONE || 'Asia/Karachi' }}
           PUNCH_LATITUDE: ${{ vars.PUNCH_LATITUDE }}
           PUNCH_LONGITUDE: ${{ vars.PUNCH_LONGITUDE }}

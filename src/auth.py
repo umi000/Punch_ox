@@ -27,8 +27,25 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 LOGGER = logging.getLogger(__name__)
+
+DEFAULT_REQUEST_TIMEOUT = 60
+
+
+def request_timeout() -> int:
+    """HTTP read/connect timeout in seconds (env: ZOHO_REQUEST_TIMEOUT)."""
+    raw = os.environ.get("ZOHO_REQUEST_TIMEOUT", str(DEFAULT_REQUEST_TIMEOUT)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ZohoAuthError(f"ZOHO_REQUEST_TIMEOUT must be an integer, got '{raw}'") from exc
+    if value < 10:
+        raise ZohoAuthError("ZOHO_REQUEST_TIMEOUT must be at least 10 seconds.")
+    return value
+
 
 DEFAULT_ACCOUNTS_URL = "https://accounts.zoho.com"
 DEFAULT_PEOPLE_URL = "https://people.zoho.com"
@@ -77,6 +94,18 @@ def _build_session() -> requests.Session:
             "DNT": "1",
         }
     )
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        backoff_factor=2,
+        status_forcelist=(502, 503, 504),
+        allowed_methods=frozenset({"GET", "POST"}),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
     return s
 
 
@@ -85,13 +114,13 @@ def _build_session() -> requests.Session:
 _CSRF_COOKIE_CANDIDATES = ("iamcsr", "iamcsrcoo", "iamtfacsr")
 
 
-def _load_signin_page(session: requests.Session, accounts_url: str) -> str:
+def _load_signin_page(session: requests.Session, accounts_url: str, *, timeout: int) -> str:
     url = (
         f"{accounts_url}/signin"
         f"?servicename={SERVICE_NAME}&signupurl={SIGNUP_URL}"
     )
     LOGGER.debug("GET %s", url)
-    resp = session.get(url, timeout=30)
+    resp = session.get(url, timeout=timeout)
     resp.raise_for_status()
 
     for name in _CSRF_COOKIE_CANDIDATES:
@@ -110,7 +139,9 @@ def _csrf_header(token: str) -> dict[str, str]:
     return {"X-ZCSRF-TOKEN": f"iamcsrcoo={token}"}
 
 
-def _lookup(session: requests.Session, accounts_url: str, csrf: str, email: str) -> dict[str, Any]:
+def _lookup(
+    session: requests.Session, accounts_url: str, csrf: str, email: str, *, timeout: int
+) -> dict[str, Any]:
     url = f"{accounts_url}/signin/v2/lookup/{requests.utils.quote(email, safe='')}"
     body = {
         "mode": "primary",
@@ -126,7 +157,7 @@ def _lookup(session: requests.Session, accounts_url: str, csrf: str, email: str)
         **_csrf_header(csrf),
     }
     LOGGER.debug("POST %s", url)
-    resp = session.post(url, data=body, headers=headers, timeout=30)
+    resp = session.post(url, data=body, headers=headers, timeout=timeout)
     payload = _safe_json(resp)
     if resp.status_code != 200 or not isinstance(payload, dict):
         raise ZohoAuthError(f"Lookup failed (HTTP {resp.status_code}): {payload}")
@@ -144,6 +175,8 @@ def _password_auth(
     user_id: str,
     digest: str,
     password: str,
+    *,
+    timeout: int,
 ) -> dict[str, Any]:
     qs = {
         "digest": digest,
@@ -162,7 +195,7 @@ def _password_auth(
     }
     body = '{"passwordauth":{"password":"' + password.replace("\\", "\\\\").replace('"', '\\"') + '"}}'
     LOGGER.debug("POST %s", url)
-    resp = session.post(url, params=qs, data=body, headers=headers, timeout=30)
+    resp = session.post(url, params=qs, data=body, headers=headers, timeout=timeout)
     payload = _safe_json(resp)
     if resp.status_code != 200:
         raise ZohoAuthError(f"Password auth HTTP {resp.status_code}: {payload}")
@@ -175,6 +208,8 @@ def _totp_verify(
     csrf: str,
     user_id: str,
     otp: str,
+    *,
+    timeout: int,
 ) -> dict[str, Any]:
     url = f"{accounts_url}/signin/v2/secondary/{user_id}/totp/verify"
     qs = {
@@ -192,7 +227,7 @@ def _totp_verify(
         **_csrf_header(csrf),
     }
     LOGGER.debug("POST %s", url)
-    resp = session.post(url, params=qs, data=body, headers=headers, timeout=30)
+    resp = session.post(url, params=qs, data=body, headers=headers, timeout=timeout)
     payload = _safe_json(resp)
     if resp.status_code != 200:
         raise ZohoAuthError(f"TOTP verify HTTP {resp.status_code}: {payload}")
@@ -252,17 +287,32 @@ def _generate_totp(secret: str) -> str:
 def _establish_people_session(
     session: requests.Session,
     people_url: str,
+    portal: str,
+    *,
+    timeout: int,
 ) -> requests.Response:
-    """Trigger the SSO redirect chain so that cookies land on people.zoho.com."""
+    """Complete SSO, then load the portal home page (required for attendance APIs)."""
     service_url = f"{people_url}/people"
-    LOGGER.debug("GET %s (to complete SSO and set people.zoho.com cookies)", service_url)
-    resp = session.get(service_url, timeout=30, allow_redirects=True)
-    resp.raise_for_status()
+    LOGGER.debug("GET %s (SSO redirect chain)", service_url)
+    sso_resp = session.get(service_url, timeout=timeout, allow_redirects=True)
+    sso_resp.raise_for_status()
 
-    final = resp.url.lower()
+    final = sso_resp.url.lower()
     if "signin" in final or "/announcement/" in final or "accounts.zoho.com" in final:
-        LOGGER.warning("SSO did not land on People (final URL=%s)", resp.url)
-    return resp
+        LOGGER.warning("SSO did not land on People (final URL=%s)", sso_resp.url)
+
+    portal_url = f"{people_url}/{portal}/zp"
+    LOGGER.debug("GET %s (portal session + conreqcsr)", portal_url)
+    portal_resp = session.get(portal_url, timeout=timeout, allow_redirects=True)
+    portal_resp.raise_for_status()
+
+    portal_final = portal_resp.url.lower()
+    if "accounts.zoho.com" in portal_final or "signin" in portal_final:
+        raise ZohoAuthError(
+            f"Portal page redirected to login (final URL={portal_resp.url}). "
+            "Check ZOHO_PORTAL and that this account can access the portal."
+        )
+    return portal_resp
 
 
 def _extract_csrf_token(session: requests.Session, html: str) -> str:
@@ -305,9 +355,10 @@ def login() -> ZohoSession:
         )
 
     session = _build_session()
-    csrf = _load_signin_page(session, accounts_url)
+    timeout = request_timeout()
+    csrf = _load_signin_page(session, accounts_url, timeout=timeout)
 
-    lookup_envelope = _lookup(session, accounts_url, csrf, email)
+    lookup_envelope = _lookup(session, accounts_url, csrf, email, timeout=timeout)
     lookup_inner = lookup_envelope.get("lookup", lookup_envelope)
     user_id = str(
         lookup_inner.get("identifier")
@@ -324,7 +375,9 @@ def login() -> ZohoSession:
         raise ZohoAuthError(f"Lookup response missing identifier/digest: {lookup_envelope}")
     LOGGER.debug("Lookup OK userId=%s", user_id)
 
-    pw_resp = _password_auth(session, accounts_url, csrf, user_id, digest, password)
+    pw_resp = _password_auth(
+        session, accounts_url, csrf, user_id, digest, password, timeout=timeout
+    )
     status_code = str(pw_resp.get("status_code", ""))
     code = str(pw_resp.get("code", ""))
     pw_inner = pw_resp.get("password") or pw_resp.get("passwordauth") or {}
@@ -360,11 +413,13 @@ def login() -> ZohoSession:
                 "enabling 2FA) as a GitHub Actions secret to enable automated login."
             )
         otp = _generate_totp(totp_secret)
-        totp_resp = _totp_verify(session, accounts_url, csrf, user_id, otp)
+        totp_resp = _totp_verify(session, accounts_url, csrf, user_id, otp, timeout=timeout)
         if str(totp_resp.get("status_code", "")) in {"E401", "401"}:
             raise ZohoAuthError(f"TOTP verify failed: {totp_resp}")
 
-    landing_resp = _establish_people_session(session, people_url)
+    landing_resp = _establish_people_session(
+        session, people_url, portal, timeout=timeout
+    )
     conreqcsr = _extract_csrf_token(session, landing_resp.text)
 
     return ZohoSession(

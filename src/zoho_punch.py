@@ -22,18 +22,21 @@ import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable, TypeVar
 from zoneinfo import ZoneInfo
 
 import requests
 
 try:
-    from .auth import ZohoAuthError, ZohoSession, login
+    from .auth import ZohoAuthError, ZohoSession, login, request_timeout
     from .notifier import notify
 except ImportError:  # Allow `python src/zoho_punch.py ...`
-    from auth import ZohoAuthError, ZohoSession, login  # type: ignore[no-redef]
+    from auth import ZohoAuthError, ZohoSession, login, request_timeout  # type: ignore[no-redef]
     from notifier import notify  # type: ignore[no-redef]
+
+T = TypeVar("T")
 
 LOGGER = logging.getLogger("zoho_punch")
 
@@ -74,7 +77,39 @@ def _is_weekday(tz_name: str) -> bool:
         return True
 
 
-def get_status(zs: ZohoSession, *, timeout: int = 30) -> dict[str, Any]:
+def _retry_on_network(
+    label: str,
+    fn: Callable[[], T],
+    *,
+    attempts: int = 3,
+    base_delay: float = 5.0,
+) -> T:
+    """Retry transient read/connect timeouts (common from GitHub Actions)."""
+    last_exc: requests.RequestException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except requests.RequestException as exc:
+            last_exc = exc
+            if attempt >= attempts:
+                break
+            delay = base_delay * attempt
+            LOGGER.warning(
+                "%s failed (attempt %s/%s): %s — retrying in %.0fs",
+                label,
+                attempt,
+                attempts,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
+def get_status(zs: ZohoSession, *, timeout: int | None = None) -> dict[str, Any]:
+    if timeout is None:
+        timeout = request_timeout()
     """Return Zoho's current attendance state for the logged-in user."""
     url = f"{zs.people_url}/{zs.portal}/AttendanceAction.zp"
     headers = {
@@ -86,14 +121,18 @@ def get_status(zs: ZohoSession, *, timeout: int = 30) -> dict[str, Any]:
     }
     body = f"mode=getStatus&conreqcsr={zs.conreqcsr}"
     LOGGER.debug("POST %s mode=getStatus", url)
-    resp = zs.session.post(url, headers=headers, data=body, timeout=timeout)
-    try:
-        payload = resp.json()
-    except ValueError:
-        payload = {"raw": resp.text[:500]}
-    if resp.status_code != 200 or not isinstance(payload, dict):
-        raise PunchError(f"getStatus HTTP {resp.status_code}: {payload}")
-    return payload
+
+    def _post() -> dict[str, Any]:
+        resp = zs.session.post(url, headers=headers, data=body, timeout=timeout)
+        try:
+            payload = resp.json()
+        except ValueError:
+            payload = {"raw": resp.text[:500]}
+        if resp.status_code != 200 or not isinstance(payload, dict):
+            raise PunchError(f"getStatus HTTP {resp.status_code}: {payload}")
+        return payload
+
+    return _retry_on_network("getStatus", _post)
 
 
 def is_checked_in(status: dict[str, Any]) -> bool:
@@ -126,7 +165,9 @@ def state_label(status: dict[str, Any]) -> str:
     return raw or ("Office In" if is_checked_in(status) else "Office Out")
 
 
-def punch(action: str, zs: ZohoSession, *, timeout: int = 30) -> dict[str, Any]:
+def punch(action: str, zs: ZohoSession, *, timeout: int | None = None) -> dict[str, Any]:
+    if timeout is None:
+        timeout = request_timeout()
     if action not in {"checkin", "checkout"}:
         raise PunchError(f"Unknown action '{action}'")
 
@@ -145,28 +186,31 @@ def punch(action: str, zs: ZohoSession, *, timeout: int = 30) -> dict[str, Any]:
     LOGGER.debug("Form fields: %s", {k: ("<set>" if k == "conreqcsr" else v) for k, v in form.items()})
 
     multipart_files = {k: (None, v) for k, v in form.items()}
-    resp = zs.session.post(url, headers=headers, files=multipart_files, timeout=timeout)
 
-    try:
-        body = resp.json()
-    except ValueError:
-        body = {"raw": resp.text[:500]}
+    def _post() -> dict[str, Any]:
+        resp = zs.session.post(url, headers=headers, files=multipart_files, timeout=timeout)
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {"raw": resp.text[:500]}
 
-    if resp.status_code != 200:
-        raise PunchError(f"Attendance HTTP {resp.status_code}: {body}")
+        if resp.status_code != 200:
+            raise PunchError(f"Attendance HTTP {resp.status_code}: {body}")
 
-    if isinstance(body, dict):
-        if body.get("error") or body.get("errorCode"):
-            raise PunchError(_friendly_error(body))
-        if body.get("fail"):
-            raise PunchError(_friendly_error(body))
-        inner = body.get("punchIn") if action == "checkin" else body.get("punchOut")
-        if isinstance(inner, dict) and inner.get("error"):
-            raise PunchError(_friendly_error(body))
-        if body.get("msg") and isinstance(body["msg"], str) and body["msg"].lower().startswith("error"):
-            raise PunchError(f"Attendance API error message: {body}")
+        if isinstance(body, dict):
+            if body.get("error") or body.get("errorCode"):
+                raise PunchError(_friendly_error(body))
+            if body.get("fail"):
+                raise PunchError(_friendly_error(body))
+            inner = body.get("punchIn") if action == "checkin" else body.get("punchOut")
+            if isinstance(inner, dict) and inner.get("error"):
+                raise PunchError(_friendly_error(body))
+            if body.get("msg") and isinstance(body["msg"], str) and body["msg"].lower().startswith("error"):
+                raise PunchError(f"Attendance API error message: {body}")
 
-    return body
+        return body
+
+    return _retry_on_network(f"punch {action}", _post)
 
 
 _ERROR_MESSAGES = {
@@ -280,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _authenticate_and_status() -> tuple[ZohoSession, dict[str, Any]]:
     LOGGER.info("Authenticating with Zoho ...")
-    zs = login()
+    zs = _retry_on_network("login", login)
     LOGGER.info("Authenticated.")
     status = get_status(zs)
     LOGGER.info("Current Zoho attendance state: %s", state_label(status))

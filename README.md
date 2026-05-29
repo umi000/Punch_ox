@@ -52,6 +52,7 @@ Repo → **Settings → Secrets and variables → Actions → Variables tab**:
 |---|---|---|
 | `ZOHO_ACCOUNTS_URL` | `https://accounts.zoho.com` | non-US data center |
 | `ZOHO_PEOPLE_URL`   | `https://people.zoho.com`   | non-US data center |
+| `ZOHO_REQUEST_TIMEOUT` | `60`                   | raise if GitHub Actions times out talking to Zoho |
 | `PUNCH_TIMEZONE`    | `Asia/Karachi`              | different country |
 | `PUNCH_LATITUDE`    | *(unset)*                   | want geo on punches (e.g. `25.395759`) |
 | `PUNCH_LONGITUDE`   | *(unset)*                   | want geo on punches (e.g. `68.362558`) |
