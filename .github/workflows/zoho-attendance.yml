@@ -6,7 +6,7 @@ on:
     # 11:05 PKT (Check-In) -> 06:05 UTC, Mon-Fri (:05 past the hour avoids :00 UTC queue spikes)
     - cron: "05 6 * * 1-5"
     # 20:05 PKT (Check-Out, 8:05 PM) -> 15:05 UTC, Mon-Fri
-    - cron: "05 15 * * 1-5"
+    - cron: "55 15 * * 1-5"
 
   workflow_dispatch:
     inputs:
@@ -21,7 +21,7 @@ on:
 
 jobs:
   punch:
-    name: Punch ${{ github.event.schedule == '05 15 * * 1-5' && 'Check-Out' || 'Check-In' }}
+    name: Punch ${{ github.event.schedule == '55 15 * * 1-5' && 'Check-Out' || 'Check-In' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -48,7 +48,7 @@ jobs:
         run: |
           if [ -n "$MANUAL_ACTION" ]; then
             echo "action=$MANUAL_ACTION" >> "$GITHUB_OUTPUT"
-          elif [ "$SCHEDULE" = "05 15 * * 1-5" ]; then
+          elif [ "$SCHEDULE" = "55 15 * * 1-5" ]; then
             echo "action=checkout" >> "$GITHUB_OUTPUT"
           else
             echo "action=checkin" >> "$GITHUB_OUTPUT"
