@@ -4,9 +4,9 @@ on:
   schedule:
     # All times in UTC. Pakistan Standard Time (PKT) = UTC+5.
     # 11:05 PKT (Check-In) -> 06:05 UTC, Mon-Fri (:05 past the hour avoids :00 UTC queue spikes)
-    - cron: "05 5 * * 1-5"
+    - cron: "05 1 * * 1-5"
     # 20:05 PKT (Check-Out, 8:05 PM) -> 15:05 UTC, Mon-Fri
-    - cron: "55 15 * * 1-5"
+    - cron: "55 11 * * 1-5"
 
   workflow_dispatch:
     inputs:
