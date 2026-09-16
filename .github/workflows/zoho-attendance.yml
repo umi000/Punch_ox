@@ -21,7 +21,7 @@ on:
 
 jobs:
   punch:
-    name: Punch ${{ github.event.schedule == '55 15 * * 1-5' && 'Check-Out' || 'Check-In' }}
+    name: Punch ${{ github.event.schedule == '55 11 * * 1-5' && 'Check-Out' || 'Check-In' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -48,7 +48,7 @@ jobs:
         run: |
           if [ -n "$MANUAL_ACTION" ]; then
             echo "action=$MANUAL_ACTION" >> "$GITHUB_OUTPUT"
-          elif [ "$SCHEDULE" = "55 15 * * 1-5" ]; then
+          elif [ "$SCHEDULE" = "55 11 * * 1-5" ]; then
             echo "action=checkout" >> "$GITHUB_OUTPUT"
           else
             echo "action=checkin" >> "$GITHUB_OUTPUT"
