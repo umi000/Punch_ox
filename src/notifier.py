@@ -2,6 +2,7 @@
 
 Designed for Gmail / Google Workspace (App Password), but works with any
 SMTP server that supports STARTTLS.
+Yes
 
 Configuration (all optional - if SMTP_USER or SMTP_APP_PASSWORD is missing,
 notifications are silently skipped):
